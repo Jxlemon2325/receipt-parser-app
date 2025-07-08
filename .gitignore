@@ -1,7 +1,13 @@
+# Virtual environment
+.venv/
+
+# Python cache
 __pycache__/
-*.py[cod]
-*.db
-.env
-.streamlit/secrets.toml
-*.log
-*.tmp
+*.pyc
+
+# SQLite DB files (optional, if you want to ignore)
+receipts.db
+receipts.db-journal
+
+# Streamlit secrets
+streamlit/secrets.toml
