@@ -22,7 +22,8 @@ from scraper_time import init_price_tracking_db, get_top_5_items, scrape_and_sto
 driver_lock = threading.Lock()
 
 # Gemini Configuration
-genai.api_key = os.getenv("GENAI_API_KEY")
+# genai.api_key = os.getenv("GENAI_API_KEY")
+genai.configure(api_key="AIzaSyCpujkcZAcvudbJlxGkHSmVXc5hePVxuSE")
 model = genai.GenerativeModel('gemini-2.5-pro-preview-06-05')
 
 # SQLite setup
@@ -136,6 +137,7 @@ def extract_receipt_data(file_path):
     except Exception as e:
         st.error(f"Failed to parse Gemini response: {e}")
         return []
+    
 
 st.title("Receipt Parser")
 st.markdown("""
@@ -306,7 +308,34 @@ if search_item or search_date:
     else:
         st.write("No matching results.")
 
-# Summary Statistics
+# # Summary Statistics
+# st.markdown("---")
+# st.subheader("Summary Statistics")
+
+# with sqlite3.connect(DB_PATH) as conn:
+#     df_summary = pd.read_sql_query("SELECT * FROM receipt_items", conn)
+#     df_searches = pd.read_sql_query("""
+#         SELECT DISTINCT searched_item, MAX(timestamp) as last_searched
+#         FROM item_price_tracking
+#         GROUP BY searched_item
+#         ORDER BY last_searched DESC
+#     """, conn)
+
+# if not df_summary.empty and not df_summary['description'].dropna().empty:
+#     most_common = df_summary['description'].value_counts().idxmax()
+#     highest_tax = df_summary['taxes'].max()
+#     most_expensive_item = df_summary.sort_values("unit_price", ascending=False).iloc[0]
+
+#     st.markdown(f"**Most Common Item:** {most_common}")
+#     st.markdown(f"**Highest Tax Paid:** ${highest_tax:.2f}")
+#     st.markdown(f"**Most Expensive Item:** {most_expensive_item['description']} at ${most_expensive_item['unit_price']:.2f}")
+# else:
+#     st.info("Not enough data for summary statistics.")
+
+# if not df_searches.empty:
+#     st.markdown("#### Recently Searched Items")
+#     st.dataframe(df_searches)
+
 st.markdown("---")
 st.subheader("Summary Statistics")
 
@@ -318,6 +347,11 @@ with sqlite3.connect(DB_PATH) as conn:
         GROUP BY searched_item
         ORDER BY last_searched DESC
     """, conn)
+
+# Safely convert relevant columns to numeric
+df_summary["unit_price"] = pd.to_numeric(df_summary["unit_price"], errors="coerce")
+df_summary["taxes"] = pd.to_numeric(df_summary["taxes"], errors="coerce")
+df_summary = df_summary.dropna(subset=["unit_price", "description"])
 
 if not df_summary.empty and not df_summary['description'].dropna().empty:
     most_common = df_summary['description'].value_counts().idxmax()
@@ -333,7 +367,7 @@ else:
 if not df_searches.empty:
     st.markdown("#### Recently Searched Items")
     st.dataframe(df_searches)
-
+    
 # Live Price Tracker
 st.markdown("---")
 st.header("Live Price Tracker for Top Purchased Items")
@@ -382,3 +416,68 @@ if not df_prices.empty:
         st.write("No tracked items available for price trend.")
 else:
     st.info("No price data found. Please start tracking.")
+
+# Track Price History
+st.markdown("---")
+st.subheader("Track Price History of Item")
+item_to_track = st.text_input("Enter item name to track (e.g. iPhone):", key="item_to_track")
+if item_to_track:
+    conn = sqlite3.connect(DB_PATH)
+    df_history = pd.read_sql_query("""
+        SELECT date, company_name, description, unit_price
+        FROM receipt_items
+        WHERE description LIKE ?
+        ORDER BY date
+    """, conn, params=(f"%{item_to_track}%",))
+    conn.close()
+    if not df_history.empty:
+        available_companies = df_history['company_name'].unique().tolist()
+        selected_companies = st.multiselect("Filter by company (optional):", available_companies, default=available_companies)
+
+        filtered_df = df_history[df_history['company_name'].isin(selected_companies)]
+
+        if not filtered_df.empty:
+            st.markdown("#### Price Trend by Company")
+            chart_data = filtered_df.copy()
+            chart_data['date'] = pd.to_datetime(chart_data['date'])
+
+            # Pivot for multi-line chart
+            pivot_df = chart_data.pivot_table(index='date', columns='company_name', values='unit_price')
+            st.line_chart(pivot_df)
+
+            st.dataframe(filtered_df)
+        else:
+            st.write("No data found for selected company(ies).")
+    else:
+        st.write("No data found for this item.")
+
+# Show cheapest price per unique item
+if st.checkbox("Show cheapest price per unique item"):
+    conn = sqlite3.connect(DB_PATH)
+    cheapest = pd.read_sql_query("""
+        SELECT company_name, description, MIN(unit_price) as cheapest_price
+        FROM receipt_items
+        GROUP BY description
+        ORDER BY cheapest_price
+    """, conn)
+    conn.close()
+    st.dataframe(cheapest)
+
+# Export full database to Excel
+if st.checkbox("Export full database to Excel"):
+    conn = sqlite3.connect(DB_PATH)
+    export_df = pd.read_sql_query("SELECT * FROM receipt_items", conn)
+    conn.close()
+
+    if not export_df.empty:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            export_df.to_excel(writer, index=False, sheet_name='Receipts')
+        output.seek(0)
+
+        st.download_button(
+            label="Download as Excel",
+            data=output,
+            file_name="receipts_export.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
