@@ -1,1 +1,12 @@
 libgl1
+libglib2.0-0
+libnss3
+libgdk-pixbuf2.0-0
+libxcomposite1
+libxrandr2
+libasound2
+libatk1.0-0
+libatk-bridge2.0-0
+libdrm2
+libxdamage1
+libgbm1
